@@ -1,7 +1,6 @@
 "use client";
 
-import React from "react";
-import Header from "@/components/header"; // si quieres reutilizar tu header
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -30,11 +29,20 @@ ChartJS.register(
 const COLORS = {
   blue1: "#5EC7FF",
   blue2: "#168AFE",
-  pinkBg: "#FFD6F3",
-  purpleBg: "#F3B7FF",
-  violetBg: "#E08CFF",
-  panel: "rgba(255,255,255,0.06)",
-  panelBorder: "rgba(255,255,255,0.10)",
+};
+
+type LastOutput = {
+  dias_estimados?: number;
+  nivel_riesgo?: number; // 0|1
+  alerta_gestion?: string;
+  confianza_modelo?: number; // %
+  mensaje_clinico?: string;
+};
+
+type DashboardSummary = {
+  last_input: Record<string, any> | null;
+  last_output: LastOutput | null;
+  updated_at: string | null;
 };
 
 function StatCard({
@@ -42,29 +50,23 @@ function StatCard({
   value,
   suffix,
   icon,
-  status = "ok", // ok | warn | danger
+  status = "ok",
 }: {
   title: string;
   value: string | number;
   suffix?: string;
-  icon?: string; // boxicons class
+  icon?: string;
   status?: "ok" | "warn" | "danger";
 }) {
   const statusColor =
     status === "ok"
       ? "text-emerald-400"
       : status === "warn"
-        ? "text-amber-400"
-        : "text-red-400";
+      ? "text-amber-400"
+      : "text-red-400";
 
   return (
-    <div
-      className="
-        rounded-2xl border border-white/10 bg-white/5
-        backdrop-blur-md shadow-lg
-        px-6 py-5 flex items-center justify-between
-      "
-    >
+    <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-lg px-6 py-5 flex items-center justify-between">
       <div>
         <p className="text-sm text-white/70">{title}</p>
         <div className="mt-2 flex items-end gap-2">
@@ -86,26 +88,89 @@ function StatCard({
 }
 
 export default function DashboardPage() {
-  // --- Mock data (cámbiala luego) ---
-  const lineLabels = ["06:00", "08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00"];
-  const predictedFlow = [20, 55, 38, 62, 45, 90, 70, 85, 110];
+  const [summary, setSummary] = useState<DashboardSummary>({
+    last_input: null,
+    last_output: null,
+    updated_at: null,
+  });
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
-  const lineData = {
-    labels: lineLabels,
-    datasets: [
-      {
-        label: "Pacientes (predicción)",
-        data: predictedFlow,
-        borderColor: COLORS.blue1,
-        backgroundColor: "rgba(94,199,255,0.18)",
-        pointBackgroundColor: COLORS.blue2,
-        pointBorderColor: "#ffffff",
-        pointRadius: 3,
-        tension: 0.35,
-        fill: true,
-      },
-    ],
+  // historial simple para el line chart (en memoria del front)
+  const [history, setHistory] = useState<Array<{ t: string; conf: number }>>([]);
+
+  const fetchSummary = async () => {
+    try {
+      setErr(null);
+      const r = await fetch("/api/dashboard_summary", { cache: "no-store" });
+      const data = (await r.json().catch(() => ({}))) as any;
+      if (!r.ok) throw new Error(data?.message || "Error leyendo dashboard");
+
+      const next: DashboardSummary = {
+        last_input: data?.last_input ?? null,
+        last_output: data?.last_output ?? null,
+        updated_at: data?.updated_at ?? null,
+      };
+
+      setSummary(next);
+
+      // guarda “confianza_modelo” en el chart si existe
+      const conf = Number(next?.last_output?.confianza_modelo);
+      if (!Number.isNaN(conf) && Number.isFinite(conf)) {
+        const t = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        setHistory((prev) => {
+          const updated = [...prev, { t, conf }];
+          // limita a 12 puntos
+          return updated.slice(-12);
+        });
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Error desconocido");
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    fetchSummary();
+    const id = setInterval(fetchSummary, 8000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const out = summary.last_output;
+
+  // Stats reales desde last_output
+  const dias = out?.dias_estimados ?? "—";
+  const riesgo = out?.nivel_riesgo ?? "—";
+  const confianza = out?.confianza_modelo ?? 0;
+
+  const riesgoStatus: "ok" | "warn" | "danger" =
+    riesgo === 1 ? "danger" : riesgo === 0 ? "ok" : "warn";
+
+  // Line chart (confianza en el tiempo)
+  const lineLabels = history.map((h) => h.t);
+  const predictedFlow = history.map((h) => h.conf);
+
+  const lineData = useMemo(
+    () => ({
+      labels: lineLabels.length ? lineLabels : ["--"],
+      datasets: [
+        {
+          label: "Confianza del modelo (%)",
+          data: predictedFlow.length ? predictedFlow : [0],
+          borderColor: COLORS.blue1,
+          backgroundColor: "rgba(94,199,255,0.18)",
+          pointBackgroundColor: COLORS.blue2,
+          pointBorderColor: "#ffffff",
+          pointRadius: 3,
+          tension: 0.35,
+          fill: true,
+        },
+      ],
+    }),
+    [lineLabels, predictedFlow]
+  );
 
   const lineOptions: any = {
     responsive: true,
@@ -128,15 +193,18 @@ export default function DashboardPage() {
       y: {
         ticks: { color: "rgba(255,255,255,0.65)" },
         grid: { color: "rgba(255,255,255,0.08)" },
+        suggestedMin: 0,
+        suggestedMax: 100,
       },
     },
   };
 
+  // Doughnuts reales (ejemplo: riesgo 0/1 y “confianza” como anillo)
   const resourceData1 = {
-    labels: ["Disponible", "Ocupado"],
+    labels: ["Normal", "Bloqueo"],
     datasets: [
       {
-        data: [70, 30],
+        data: riesgo === 1 ? [0, 100] : riesgo === 0 ? [100, 0] : [50, 50],
         backgroundColor: [COLORS.blue1, "rgba(255,255,255,0.10)"],
         borderWidth: 0,
         cutout: "72%",
@@ -145,10 +213,10 @@ export default function DashboardPage() {
   };
 
   const resourceData2 = {
-    labels: ["Disponible", "Ocupado"],
+    labels: ["Confianza", "Incertidumbre"],
     datasets: [
       {
-        data: [90, 10],
+        data: [Math.max(0, Math.min(100, Number(confianza) || 0)), 100 - Math.max(0, Math.min(100, Number(confianza) || 0))],
         backgroundColor: [COLORS.blue2, "rgba(255,255,255,0.10)"],
         borderWidth: 0,
         cutout: "72%",
@@ -162,12 +230,30 @@ export default function DashboardPage() {
     plugins: { legend: { display: false } },
   };
 
-  const patientsTable = [
-    { id: "P-8729", severidad: "ALTA", diag: "Neumonía", estancia: "5 días", riesgo: "MEDIO" },
-    { id: "P-8730", severidad: "MEDIA", diag: "Crisis asmática", estancia: "2 días", riesgo: "BAJO" },
-    { id: "P-8731", severidad: "BAJA", diag: "Fractura", estancia: "1 día", riesgo: "BAJO" },
-    { id: "P-8732", severidad: "ALTA", diag: "Infarto", estancia: "7 días", riesgo: "ALTO" },
-  ];
+  // Tabla real desde last_input + last_output
+  const patientsTable = useMemo(() => {
+    if (!summary.last_input || !summary.last_output) return [];
+    const li = summary.last_input;
+
+    const sevMap: Record<string, string> = {
+      Severe: "ALTA",
+      Moderate: "MEDIA",
+      Minor: "BAJA",
+    };
+
+    const sev = sevMap[String(li?.Illness_Severity ?? "")] ?? "—";
+    const riskLabel = summary.last_output?.nivel_riesgo === 1 ? "ALTO" : "BAJO";
+
+    return [
+      {
+        id: "LAST",
+        severidad: sev,
+        diag: String(li?.Department ?? "—"),
+        estancia: `${summary.last_output?.dias_estimados ?? "—"} días`,
+        riesgo: riskLabel,
+      },
+    ];
+  }, [summary.last_input, summary.last_output]);
 
   const badge = (text: string) => {
     const map: Record<string, string> = {
@@ -181,9 +267,12 @@ export default function DashboardPage() {
     return map[text] ?? "bg-white/10 text-white/80 border-white/15";
   };
 
+  const updatedText = summary.updated_at
+    ? new Date(summary.updated_at).toLocaleString()
+    : "Sin data aún";
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-[#FFD6F3] via-[#F3B7FF] to-[#E08CFF]">
-      {/* overlay oscuro para look dashboard */}
       <div className="min-h-screen w-full bg-slate-950/70">
         <div className="mx-auto w-full max-w-7xl px-6 py-6">
           {/* Top bar */}
@@ -197,49 +286,64 @@ export default function DashboardPage() {
                   Monitor Predictivo en Tiempo Real
                 </h1>
                 <p className="text-xs text-white/60">Pro-Hosp • Dashboard</p>
+                <p className="text-[11px] text-white/50 mt-0.5">
+                  Última actualización: {updatedText}
+                </p>
               </div>
             </div>
 
-            <div className="text-right">
-              <p className="text-xs text-white/60">Jueves, 18 de Abril 2024</p>
-              <p className="text-sm font-semibold text-white">10:30 AM</p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={fetchSummary}
+                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm text-white/80 hover:bg-white/10 transition"
+              >
+                <i className="bx bx-refresh text-lg" />
+                Refresh
+              </button>
+
+              <Link
+                href="/dashboard/form"
+                className="group inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-[#5EC7FF] to-[#168AFE] hover:from-[#168AFE] hover:to-[#5EC7FF] text-white text-sm font-semibold shadow-lg shadow-blue-500/30 transition-all duration-300"
+              >
+                Enviar datos
+                <i className="bx bx-paper-plane text-lg transition-transform duration-300 group-hover:translate-x-1" />
+              </Link>
             </div>
-            <Link
-              href="/dashboard/form"
-              className="
-      group inline-flex items-center gap-2 px-5 py-2.5 rounded-full
-      bg-gradient-to-r from-[#5EC7FF] to-[#168AFE]
-      hover:from-[#168AFE] hover:to-[#5EC7FF]
-      text-white text-sm font-semibold
-      shadow-lg shadow-blue-500/30
-      transition-all duration-300
-    "
-            >
-              Enviar datos
-              <i className="bx bx-paper-plane text-lg transition-transform duration-300 group-hover:translate-x-1" />
-            </Link>
           </div>
 
-          {/* Stats */}
+          {/* Status */}
+          <div className="mt-4">
+            {err ? (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 text-red-100 px-4 py-3 text-sm">
+                {err}
+              </div>
+            ) : loading ? (
+              <div className="rounded-xl border border-white/10 bg-white/5 text-white/70 px-4 py-3 text-sm">
+                Cargando dashboard_summary...
+              </div>
+            ) : null}
+          </div>
+
+          {/* Stats (reales) */}
           <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatCard
-              title="Pacientes Estimados HOY"
-              value="150"
-              icon="bx bx-user"
+              title="Días Estancia Estimados"
+              value={dias}
+              icon="bx bx-time-five"
               status="ok"
             />
             <StatCard
-              title="Ocupación UCI Actual"
-              value="85"
-              suffix="%"
-              icon="bx bx-plus-medical"
-              status="danger"
+              title="Riesgo de Bloqueo"
+              value={riesgo === "—" ? "—" : riesgo === 1 ? "ALTO" : "BAJO"}
+              icon="bx bx-error-circle"
+              status={riesgoStatus}
             />
             <StatCard
-              title="Camas Disponibles 24H"
-              value="45"
-              icon="bx bx-bed"
-              status="ok"
+              title="Confianza del Modelo"
+              value={out?.confianza_modelo ?? "—"}
+              suffix={out?.confianza_modelo != null ? "%" : undefined}
+              icon="bx bx-line-chart"
+              status={out?.confianza_modelo != null && out.confianza_modelo >= 80 ? "ok" : "warn"}
             />
           </div>
 
@@ -249,59 +353,85 @@ export default function DashboardPage() {
             <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-lg p-5">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-white/90">
-                  Flujo de Pacientes Anticipado <span className="text-white/60">(Próximas 24H)</span>
+                  Confianza del Modelo <span className="text-white/60">(historial en vivo)</span>
                 </h2>
                 <div className="flex items-center gap-2 text-white/70 text-xs">
                   <span className="h-2 w-2 rounded-full" style={{ backgroundColor: COLORS.blue1 }} />
-                  Predicción
+                  %
                 </div>
               </div>
 
               <div className="mt-4 h-[260px]">
                 <Line data={lineData} options={lineOptions} />
               </div>
+
+              {out?.alerta_gestion ? (
+                <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs font-semibold text-white/80">Alerta</p>
+                  <p className="text-sm text-white mt-1">{out.alerta_gestion}</p>
+                  {out.mensaje_clinico ? (
+                    <p className="text-xs text-white/70 mt-1">{out.mensaje_clinico}</p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             {/* Table */}
             <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-lg p-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-white/90">Predicciones a Nivel Paciente</h2>
-                <button className="text-xs text-white/70 hover:text-white transition">
-                  Ver todo <i className="bx bx-chevron-right" />
-                </button>
+                <h2 className="text-sm font-semibold text-white/90">Última Predicción (Paciente)</h2>
+                <span className="text-xs text-white/60">
+                  {summary.last_input ? "Con data" : "Sin data"}
+                </span>
               </div>
 
               <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-white/5 text-white/70">
                     <tr>
-                      <th className="px-4 py-3">ID Paciente</th>
+                      <th className="px-4 py-3">ID</th>
                       <th className="px-4 py-3">Severidad</th>
-                      <th className="px-4 py-3">Diagnóstico</th>
-                      <th className="px-4 py-3">Días Estancia</th>
-                      <th className="px-4 py-3">Riesgo Bloqueo</th>
+                      <th className="px-4 py-3">Departamento</th>
+                      <th className="px-4 py-3">Estancia</th>
+                      <th className="px-4 py-3">Riesgo</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10">
-                    {patientsTable.map((r) => (
-                      <tr key={r.id} className="text-white/85 hover:bg-white/5 transition">
-                        <td className="px-4 py-3 font-medium">{r.id}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded-full border px-2 py-1 ${badge(r.severidad)}`}>
-                            {r.severidad}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">{r.diag}</td>
-                        <td className="px-4 py-3">{r.estancia}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded-full border px-2 py-1 ${badge(r.riesgo)}`}>
-                            {r.riesgo}
-                          </span>
+                    {patientsTable.length ? (
+                      patientsTable.map((r) => (
+                        <tr key={r.id} className="text-white/85 hover:bg-white/5 transition">
+                          <td className="px-4 py-3 font-medium">{r.id}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center rounded-full border px-2 py-1 ${badge(r.severidad)}`}>
+                              {r.severidad}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">{r.diag}</td>
+                          <td className="px-4 py-3">{r.estancia}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center rounded-full border px-2 py-1 ${badge(r.riesgo)}`}>
+                              {r.riesgo}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr className="text-white/70">
+                        <td className="px-4 py-4" colSpan={5}>
+                          Aún no hay predicción. Ve a “Enviar datos”.
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Raw JSON */}
+              <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
+                <p className="text-xs font-semibold text-white/70 mb-2">dashboard_summary (raw)</p>
+                <pre className="text-[11px] text-white/80 overflow-auto">
+{JSON.stringify(summary, null, 2)}
+                </pre>
               </div>
             </div>
           </div>
@@ -312,34 +442,21 @@ export default function DashboardPage() {
             <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-lg p-5 lg:col-span-1">
               <div className="flex items-center gap-2">
                 <i className="bx bx-alarm-exclamation text-xl text-red-300" />
-                <h2 className="text-sm font-semibold text-white/90">Alertas del Sistema</h2>
+                <h2 className="text-sm font-semibold text-white/90">Estado del Sistema</h2>
               </div>
 
               <div className="mt-4 space-y-3">
                 <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs font-semibold text-red-200">
-                    URGENTE: Pico de demanda estimado (14:00 - 18:00)
+                  <p className="text-xs font-semibold text-white/80">
+                    Última actualización
                   </p>
-                  <p className="mt-1 text-xs text-white/70">
-                    Recomendación: reforzar turno B y habilitar camas de contingencia.
-                  </p>
+                  <p className="mt-1 text-xs text-white/70">{updatedText}</p>
                 </div>
 
                 <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs font-semibold text-amber-200">
-                    AVISO: Insumos críticos en descenso
-                  </p>
+                  <p className="text-xs font-semibold text-white/80">Mensaje</p>
                   <p className="mt-1 text-xs text-white/70">
-                    Recomendación: revisar stock de sueros y material de curación.
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs font-semibold text-emerald-200">
-                    OK: Personal disponible estable
-                  </p>
-                  <p className="mt-1 text-xs text-white/70">
-                    Sin acciones sugeridas por el sistema.
+                    {out?.mensaje_clinico ?? "Sin mensaje aún."}
                   </p>
                 </div>
               </div>
@@ -348,56 +465,53 @@ export default function DashboardPage() {
             {/* Resources */}
             <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-lg p-5 lg:col-span-2">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-white/90">Disponibilidad de Recursos</h2>
-                <div className="text-xs text-white/60">Actualizado hace 2 min</div>
+                <h2 className="text-sm font-semibold text-white/90">Indicadores</h2>
+                <div className="text-xs text-white/60">Auto-refresh cada 8s</div>
               </div>
 
               <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Doughnut 1 */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-5 flex items-center gap-5">
                   <div className="h-[120px] w-[120px]">
                     <Doughnut data={resourceData1} options={doughnutOptions} />
                   </div>
                   <div>
-                    <p className="text-xs text-white/60">Personal</p>
-                    <p className="text-2xl font-bold text-white">70%</p>
-                    <p className="mt-1 text-xs text-white/70">
-                      Turno disponible • Nivel estable
+                    <p className="text-xs text-white/60">Riesgo</p>
+                    <p className="text-2xl font-bold text-white">
+                      {riesgo === "—" ? "—" : riesgo === 1 ? "ALTO" : "BAJO"}
                     </p>
+                    <p className="mt-1 text-xs text-white/70">Basado en nivel_riesgo</p>
                   </div>
                 </div>
 
-                {/* Doughnut 2 */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-5 flex items-center gap-5">
                   <div className="h-[120px] w-[120px]">
                     <Doughnut data={resourceData2} options={doughnutOptions} />
                   </div>
                   <div>
-                    <p className="text-xs text-white/60">Insumos</p>
-                    <p className="text-2xl font-bold text-white">90%</p>
-                    <p className="mt-1 text-xs text-white/70">
-                      Stock alto • Sin riesgo inmediato
+                    <p className="text-xs text-white/60">Confianza</p>
+                    <p className="text-2xl font-bold text-white">
+                      {out?.confianza_modelo != null ? `${out.confianza_modelo}%` : "—"}
                     </p>
+                    <p className="mt-1 text-xs text-white/70">Probabilidad del clasificador</p>
                   </div>
                 </div>
               </div>
 
-              {/* mini legend */}
               <div className="mt-4 flex items-center gap-4 text-xs text-white/70">
                 <span className="inline-flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full" style={{ backgroundColor: COLORS.blue1 }} />
-                  Disponible
+                  Métrica principal
                 </span>
                 <span className="inline-flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-white/20" />
-                  Ocupado
+                  Resto
                 </span>
               </div>
             </div>
           </div>
 
           <div className="mt-6 text-center text-xs text-white/50">
-            Pro-Hosp • Demo UI • Data simulada
+            Pro-Hosp • Live UI (via FastAPI dashboard_summary)
           </div>
         </div>
       </div>

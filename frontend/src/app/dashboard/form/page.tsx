@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 const INPUT =
   "mt-2 w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-white/40 focus:border-[#5EC7FF] focus:ring-2 focus:ring-[#5EC7FF]/30 transition";
@@ -9,6 +10,8 @@ const INPUT =
 const LABEL = "text-sm font-medium text-white/80";
 
 export default function PredictFormPage() {
+  const router = useRouter();
+
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
@@ -29,12 +32,9 @@ export default function PredictFormPage() {
     Age: "21-30",
   });
 
-  const onChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
+  const onChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
 
-    // campos numéricos
     const numeric = new Set([
       "Hospital_type",
       "Hospital_city",
@@ -64,15 +64,18 @@ export default function PredictFormPage() {
         body: JSON.stringify(form),
       });
 
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: "Error" }));
-        throw new Error(err.message || "Error enviando datos");
+        throw new Error((data as any)?.message || "Error enviando datos");
       }
 
-      const data = await res.json();
-      setMsg({ type: "ok", text: `Enviado ✅ Respuesta: ${JSON.stringify(data)}` });
+      setMsg({ type: "ok", text: `Enviado ✅ Resultado: ${JSON.stringify(data)}` });
+
+      // redirige al dashboard para ver la data real ya guardada en LAST_PREDICTION
+      setTimeout(() => router.push("/dashboard"), 700);
     } catch (err: any) {
-      setMsg({ type: "err", text: err.message || "Error desconocido" });
+      setMsg({ type: "err", text: err?.message || "Error desconocido" });
     } finally {
       setLoading(false);
     }
@@ -82,12 +85,11 @@ export default function PredictFormPage() {
     <div className="min-h-screen w-full bg-gradient-to-br from-[#FFD6F3] via-[#F3B7FF] to-[#E08CFF]">
       <div className="min-h-screen w-full bg-slate-950/70">
         <div className="mx-auto w-full max-w-5xl px-6 py-8">
-          {/* top */}
           <div className="flex items-center justify-between gap-4">
             <div>
               <h1 className="text-xl font-semibold text-white">Enviar datos al modelo</h1>
               <p className="text-sm text-white/60">
-                Completa los campos y envía el JSON (luego conectas tu backend).
+                Esto hace POST a <span className="text-white/80">/api/predict</span> y FastAPI guarda el resultado para el dashboard.
               </p>
             </div>
 
@@ -100,7 +102,6 @@ export default function PredictFormPage() {
             </Link>
           </div>
 
-          {/* card */}
           <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-lg p-6">
             {msg && (
               <div
@@ -115,7 +116,6 @@ export default function PredictFormPage() {
             )}
 
             <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* NUMBERS */}
               <div>
                 <label className={LABEL}>Hospital_type</label>
                 <input name="Hospital_type" type="number" value={form.Hospital_type} onChange={onChange} className={INPUT} />
@@ -156,7 +156,6 @@ export default function PredictFormPage() {
                 <input name="Admission_Deposit" type="number" value={form.Admission_Deposit} onChange={onChange} className={INPUT} />
               </div>
 
-              {/* SELECTS */}
               <div>
                 <label className={LABEL}>Department</label>
                 <select name="Department" value={form.Department} onChange={onChange} className={INPUT}>
@@ -220,19 +219,11 @@ export default function PredictFormPage() {
                 </select>
               </div>
 
-              {/* actions */}
               <div className="md:col-span-2 mt-2 flex flex-col sm:flex-row gap-3">
                 <button
                   disabled={loading}
                   type="submit"
-                  className="
-                    group inline-flex items-center justify-center gap-2 px-10 py-3 rounded-full
-                    bg-gradient-to-r from-[#5EC7FF] to-[#168AFE]
-                    hover:from-[#168AFE] hover:to-[#5EC7FF]
-                    text-white text-sm font-semibold
-                    shadow-lg shadow-blue-500/30
-                    transition-all duration-300 disabled:opacity-60
-                  "
+                  className="group inline-flex items-center justify-center gap-2 px-10 py-3 rounded-full bg-gradient-to-r from-[#5EC7FF] to-[#168AFE] hover:from-[#168AFE] hover:to-[#5EC7FF] text-white text-sm font-semibold shadow-lg shadow-blue-500/30 transition-all duration-300 disabled:opacity-60"
                 >
                   {loading ? "Enviando..." : "Enviar"}
                   <i className="bx bx-right-arrow-alt text-xl transition-transform duration-300 group-hover:translate-x-1" />
@@ -258,18 +249,13 @@ export default function PredictFormPage() {
                       Age: "21-30",
                     })
                   }
-                  className="
-                    inline-flex items-center justify-center gap-2 px-10 py-3 rounded-full
-                    border border-white/15 bg-white/5 text-white/80 text-sm font-semibold
-                    hover:bg-white/10 transition
-                  "
+                  className="inline-flex items-center justify-center gap-2 px-10 py-3 rounded-full border border-white/15 bg-white/5 text-white/80 text-sm font-semibold hover:bg-white/10 transition"
                 >
                   Reset
                   <i className="bx bx-refresh text-lg" />
                 </button>
               </div>
 
-              {/* preview */}
               <div className="md:col-span-2 mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
                 <p className="text-xs font-semibold text-white/70 mb-2">Preview JSON</p>
                 <pre className="text-xs text-white/80 overflow-auto">
