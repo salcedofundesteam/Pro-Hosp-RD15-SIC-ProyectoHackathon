@@ -1,8 +1,18 @@
+"use client";
+
 import Link from "next/link";
+import useLoginForm from "@/hooks/useLoginForm";
+import { LoginFail, LoginSucess } from "@/components/alert";
 
 export default function LoginPage() {
+  const { handleChange, handleSubmit, handleInputs, errorMessage, successMessage } =
+    useLoginForm();
+
   return (
     <div className="w-full max-w-5xl rounded-3xl bg-white shadow-2xl overflow-hidden border border-slate-200">
+      {errorMessage && <LoginFail descriptionFail={errorMessage} />}
+      {successMessage && <LoginSucess descriptionSucess={successMessage} />}
+
       <div className="grid grid-cols-1 md:grid-cols-2">
         {/* LEFT ART */}
         <div className="relative hidden md:block p-8">
@@ -35,13 +45,17 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <form className="space-y-4">
+          {/* ✅ Conecta el submit */}
+          <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
               <label className="text-sm font-medium text-slate-700">Your email</label>
               <input
-                type="email"
-                placeholder="you@email.com"
-                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200 transition"
+                type="text"
+                name="username"                 // ✅ name requerido por handleChange
+                value={handleInputs.username}   // ✅ valor correcto
+                onChange={handleChange}
+                placeholder="admin"
+                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200 transition text-black"
               />
             </div>
 
@@ -50,8 +64,11 @@ export default function LoginPage() {
               <div className="mt-2 relative">
                 <input
                   type="password"
-                  placeholder="••••••••"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 pr-11 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200 transition"
+                  name="password"               // ✅ name requerido
+                  value={handleInputs.password} // ✅ valor correcto
+                  onChange={handleChange}
+                  placeholder="admin"
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 pr-11 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200 transition text-black"
                 />
                 <button
                   type="button"
@@ -63,8 +80,9 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {/* ✅ Debe ser submit */}
             <button
-              type="button"
+              type="submit"
               className="
                 w-full rounded-xl py-3 text-sm font-semibold text-white
                 bg-gradient-to-r from-[#7C3AED] to-[#4F46E5]
@@ -108,7 +126,10 @@ export default function LoginPage() {
 
           <p className="mt-6 text-sm text-slate-500">
             Don&apos;t have an account?{" "}
-            <Link href="register" className="text-purple-600 font-semibold hover:underline">
+            <Link
+              href="/register" // ✅ ruta absoluta
+              className="text-purple-600 font-semibold hover:underline"
+            >
               Sign up
             </Link>
           </p>

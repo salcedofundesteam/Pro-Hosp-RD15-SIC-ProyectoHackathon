@@ -2,6 +2,7 @@ import Header from "@/components/header";
 import { sail } from "./layout";
 import Image from "next/image";
 import Link from "next/link";
+import RTF from "@/components/rtf";
 
 export default function Home() {
   return (
@@ -35,7 +36,7 @@ export default function Home() {
 
               <div className="mt-10 flex flex-wrap items-center gap-4">
                 <Link
-                href={"auth/login"}
+                  href={"auth/login"}
                   className="
               group flex items-center gap-2 px-10 py-3 rounded-full
               bg-gradient-to-r from-[#5EC7FF] to-[#168AFE]
@@ -66,9 +67,10 @@ export default function Home() {
             </div>
 
             {/* RIGHT (vacío para 3D) */}
-            <div className="w-full lg:w-1/2 flex items-center justify-center">
-              {/* Modelos 3D (vacío) */}
-              <div className="h-[320px] w-full max-w-[520px] lg:h-[420px] rounded-2xl" />
+            <div className="w-full h-full lg:w-1/2 flex items-center justify-center">
+              <div className="h-[420px] w-full max-w-[520px] rounded-2xl overflow-hidden">
+                <RTF />
+              </div>
             </div>
           </main>
         </div>
